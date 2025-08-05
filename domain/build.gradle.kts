@@ -29,6 +29,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.mavenPublish)
     alias(libs.plugins.jacoco)
+    id("com.google.protobuf") version "0.9.4"
 }
 
 dependencies {
@@ -59,15 +60,36 @@ dependencies {
     testImplementation(project(":test-helpers"))
 }
 
-sourceSets {
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.24.4"
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                getByName("java") {
+                    option("lite")
+                }
+                register("kotlin") {
+                    option("lite")
+                }
+            }
+        }
+    }
+}
+    
+ sourceSets {
     assert(file("./protocol/src/common.proto").exists()) {
         "Error: Git protobuf submodule missing. Please run `git submodule update --init`.\n"
     }
 
     main {
         java.srcDir("./build/generated/source/proto/main/java")
-        java.srcDir("./build/generated/source/proto/main/kotlin")
+        java.srcDir("./build/generated/source/proto/main/kotlin") 
         java.srcDir("./build/generated/source/libthreema")
+        proto {
+            srcDir("./protocol/src")
+        }
     }
 }
 
@@ -107,7 +129,7 @@ afterEvaluate {
     // Define the task to generate libthreema library (only used to generate bindings for it)
     val generateLibthreema = tasks.register<Exec>("generateLibthreema") {
         workingDir("${project.projectDir}/libthreema")
-        commandLine("cargo", "build", "-F", "uniffi", "-p", "libthreema", "--release")
+        commandLine("/root/.cargo/bin/cargo", "build", "-F", "uniffi", "-p", "libthreema", "--release")
     }
 
     // Define the task to generate the uniffi bindings for libthreema
@@ -125,7 +147,7 @@ afterEvaluate {
             }
 
             val processBuilder = ProcessBuilder(
-                "cargo",
+                "/root/.cargo/bin/cargo",
                 "run",
                 "-p",
                 "uniffi-bindgen",
@@ -172,16 +194,10 @@ publishing {
     }
 }
 
-tasks.register<Exec>("compileProto") {
-    workingDir(project.projectDir)
-    commandLine("./compile-proto.sh")
-}
-
-tasks.compileKotlin.dependsOn("compileProto")
 
 tasks.register<Exec>("libthreemaCleanUp") {
     workingDir("${project.projectDir}/libthreema")
-    commandLine("cargo", "clean")
+    commandLine("/root/.cargo/bin/cargo", "clean")
 }
 
 tasks.clean.dependsOn("libthreemaCleanUp")

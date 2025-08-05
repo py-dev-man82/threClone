@@ -38,6 +38,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
@@ -71,6 +72,7 @@ import com.google.android.material.tabs.TabLayout;
 
 import org.slf4j.Logger;
 
+import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Date;
@@ -110,6 +112,7 @@ import ch.threema.app.messagereceiver.MessageReceiver;
 import ch.threema.app.routines.SynchronizeContactsRoutine;
 import ch.threema.app.services.AvatarCacheService;
 import ch.threema.app.services.ContactService;
+import ch.threema.app.services.ContactExportImportService;
 import ch.threema.app.services.LockAppService;
 import ch.threema.app.preference.service.PreferenceService;
 import ch.threema.app.services.SynchronizeContactsService;
@@ -125,6 +128,7 @@ import ch.threema.app.ui.ViewExtensionsKt;
 import ch.threema.app.utils.BitmapUtil;
 import ch.threema.app.utils.ConfigUtils;
 import ch.threema.app.utils.EditTextUtil;
+import ch.threema.app.utils.FileUtil;
 import ch.threema.app.utils.IntentDataUtil;
 import ch.threema.app.utils.MimeUtil;
 import ch.threema.app.utils.NameUtil;
@@ -162,6 +166,8 @@ public class ContactsSectionFragment
     private static final String DIALOG_TAG_RECENTLY_ADDED_SELECTOR = "ras";
     private static final String DIALOG_TAG_REALLY_DELETE_CONTACTS = "rdc";
     private static final String DIALOG_TAG_REPORT_SPAM = "spam";
+    
+    private static final int REQUEST_CODE_IMPORT_CONTACTS = 1001;
 
     private static final String RUN_ON_ACTIVE_SHOW_LOADING = "show_loading";
     private static final String RUN_ON_ACTIVE_HIDE_LOADING = "hide_loading";
@@ -197,6 +203,7 @@ public class ContactsSectionFragment
 
     private SynchronizeContactsService synchronizeContactsService;
     private ContactService contactService;
+    private ContactExportImportService contactExportImportService;
     @Nullable
     private PreferenceService preferenceService;
     private LockAppService lockAppService;
@@ -426,6 +433,7 @@ public class ContactsSectionFragment
         ContactService contactService;
         boolean isOnLaunch, forceWork;
         int selectedTab;
+        private static final Logger logger = LoggingUtil.getThreemaLogger("ContactsSectionFragment");
 
         FetchContactsTask(ContactService contactService, boolean isOnLaunch, int selectedTab, boolean forceWork) {
             this.contactService = contactService;
@@ -436,6 +444,7 @@ public class ContactsSectionFragment
 
         @Override
         protected Pair<List<ContactModel>, FetchResults> doInBackground(Void... voids) {
+            logger.info("FetchContactsTask: Starting doInBackground - selectedTab: " + selectedTab + ", forceWork: " + forceWork);
             List<ContactModel> allContacts = null;
 
             // Count new contacts
@@ -443,15 +452,34 @@ public class ContactsSectionFragment
 
             if (ConfigUtils.isWorkBuild()) {
                 results.workCount = contactService.countIsWork();
+                logger.info("FetchContactsTask: Work build - workCount: " + results.workCount);
                 if (selectedTab == TAB_WORK_ONLY) {
                     if (results.workCount > 0 || forceWork) {
                         allContacts = contactService.getAllDisplayedWork(ContactService.ContactSelection.INCLUDE_INVALID);
+                        logger.info("FetchContactsTask: Retrieved work contacts: " + (allContacts != null ? allContacts.size() : 0));
                     }
                 }
             }
 
             if (allContacts == null) {
+                logger.info("FetchContactsTask: Calling contactService.getAllDisplayed(INCLUDE_INVALID)");
                 allContacts = contactService.getAllDisplayed(ContactService.ContactSelection.INCLUDE_INVALID);
+                logger.info("FetchContactsTask: Retrieved all displayed contacts: " + (allContacts != null ? allContacts.size() : 0));
+                
+                // Also get ALL contacts for comparison
+                List<ContactModel> allContactsInDB = contactService.getAll();
+                logger.info("FetchContactsTask: Total contacts in DB (getAll()): " + (allContactsInDB != null ? allContactsInDB.size() : 0));
+                
+                if (allContacts != null && allContacts.size() > 0) {
+                    logger.info("FetchContactsTask: Contact identities from getAllDisplayed: " + 
+                        allContacts.stream().map(c -> c.getIdentity() + "(" + c.getFirstName() + " " + c.getLastName() + ")").collect(java.util.stream.Collectors.joining(", ")));
+                }
+                
+                if (allContactsInDB != null && allContactsInDB.size() > 0) {
+                    logger.info("FetchContactsTask: ALL contact identities from getAll(): " + 
+                        allContactsInDB.stream().map(c -> c.getIdentity() + "(" + c.getFirstName() + " " + c.getLastName() + ")" + 
+                        " [hidden=" + c.isHidden() + ", state=" + c.getState() + "]").collect(java.util.stream.Collectors.joining(", ")));
+                }
             }
 
             if (!ConfigUtils.isWorkBuild()) {
@@ -597,6 +625,22 @@ public class ContactsSectionFragment
         super.onCreateOptionsMenu(menu, inflater);
     }
 
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        logger.info("onOptionsItemSelected: itemId=" + item.getItemId() + ", title=" + item.getTitle());
+        
+        if (item.getItemId() == R.id.menu_export_contacts) {
+            logger.info("Export contacts menu item selected");
+            exportContacts();
+            return true;
+        } else if (item.getItemId() == R.id.menu_import_contacts) {
+            logger.info("Import contacts menu item selected");
+            importContacts();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
     final SearchView.OnQueryTextListener queryTextListener = new SearchView.OnQueryTextListener() {
         @Override
         public boolean onQueryTextChange(String query) {
@@ -681,26 +725,46 @@ public class ContactsSectionFragment
 
     @SuppressLint("StaticFieldLeak")
     private void updateList() {
+        logger.info("ContactsSectionFragment: updateList() called");
         if (!this.requiredInstances()) {
             logger.error("could not instantiate required objects");
             return;
         }
 
         int desiredTab = getDesiredWorkTab(false, null);
+        logger.info("ContactsSectionFragment: updateList() - desiredTab: " + desiredTab);
 
         if (contactListAdapter != null) {
+            logger.info("ContactsSectionFragment: Starting FetchContactsTask for updateList");
             new FetchContactsTask(contactService, false, desiredTab, false) {
                 @Override
                 protected void onPostExecute(Pair<List<ContactModel>, FetchResults> result) {
                     final List<ContactModel> contactModels = result.first;
                     final FetchResults counts = result.second;
 
+                    logger.info("ContactsSectionFragment: FetchContactsTask completed - " + 
+                        (contactModels != null ? contactModels.size() : 0) + " contacts fetched");
+                    
+                    if (contactModels != null) {
+                        logger.info("ContactsSectionFragment: Contact list from DB: " + 
+                            contactModels.stream().map(c -> c.getIdentity() + "(" + c.getFirstName() + " " + c.getLastName() + ")").collect(java.util.stream.Collectors.joining(", ")));
+                    }
+
                     if (contactModels != null && contactListAdapter != null && isAdded()) {
                         updateContactsCounter(contactModels.size(), counts);
+                        logger.info("ContactsSectionFragment: Calling contactListAdapter.updateData() with " + contactModels.size() + " contacts");
                         contactListAdapter.updateData(contactModels);
+                        logger.info("ContactsSectionFragment: contactListAdapter.updateData() completed");
+                    } else {
+                        logger.warn("ContactsSectionFragment: Cannot update adapter - contactModels: " + 
+                            (contactModels != null ? "not null" : "null") + 
+                            ", contactListAdapter: " + (contactListAdapter != null ? "not null" : "null") + 
+                            ", isAdded: " + isAdded());
                     }
                 }
             }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+        } else {
+            logger.warn("ContactsSectionFragment: contactListAdapter is null, cannot update list");
         }
     }
 
@@ -783,7 +847,8 @@ public class ContactsSectionFragment
             this.contactListener,
             this.preferenceService,
             this.synchronizeContactsService,
-            this.lockAppService);
+            this.lockAppService,
+            this.contactExportImportService);
     }
 
     protected void instantiate() {
@@ -795,6 +860,7 @@ public class ContactsSectionFragment
                 this.preferenceService = this.serviceManager.getPreferenceService();
                 this.synchronizeContactsService = this.serviceManager.getSynchronizeContactsService();
                 this.lockAppService = this.serviceManager.getLockAppService();
+                this.contactExportImportService = new ContactExportImportService(getContext(), this.contactService, this.serviceManager.getDatabaseService());
             } catch (MasterKeyLockedException e) {
                 logger.debug("Master Key locked!");
             }
@@ -1059,17 +1125,24 @@ public class ContactsSectionFragment
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        switch (requestCode) {
-            case ThreemaActivity.ACTIVITY_ID_ADD_CONTACT:
-                if (actionMode != null) {
-                    actionMode.finish();
+        logger.info("ContactsSectionFragment: onActivityResult called - requestCode: " + requestCode + ", resultCode: " + resultCode);
+        
+        if (requestCode == REQUEST_CODE_IMPORT_CONTACTS) {
+            logger.info("ContactsSectionFragment: Import contacts result received");
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                Uri uri = data.getData();
+                logger.info("ContactsSectionFragment: File selected for import: " + (uri != null ? uri.toString() : "null"));
+                if (uri != null) {
+                    processContactImport(uri);
+                } else {
+                    logger.warn("ContactsSectionFragment: No file URI received");
+                    Toast.makeText(getActivity(), "No file selected", Toast.LENGTH_SHORT).show();
                 }
-                break;
-            case ThreemaActivity.ACTIVITY_ID_CONTACT_DETAIL:
-                break;
-            default:
-                super.onActivityResult(requestCode, resultCode, data);
+            } else {
+                logger.info("ContactsSectionFragment: Import cancelled or failed - resultCode: " + resultCode);
+            }
         }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -1560,5 +1633,147 @@ public class ContactsSectionFragment
             default:
                 break;
         }
+    }
+
+    private void exportContacts() {
+        if (!requiredInstances()) {
+            return;
+        }
+
+        try {
+            String exportPath = contactExportImportService.exportContacts();
+            if (exportPath != null) {
+                File exportFile = new File(exportPath);
+                Toast.makeText(getContext(), 
+                    getString(R.string.export_contacts_success, exportFile.getName()), 
+                    Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(getContext(), 
+                    getString(R.string.export_contacts_failed), 
+                    Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            logger.error("Failed to export contacts", e);
+            Toast.makeText(getContext(), 
+                getString(R.string.export_contacts_error, e.getMessage()), 
+                Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importContacts() {
+        logger.info("importContacts() called");
+        
+        if (!requiredInstances()) {
+            logger.warn("importContacts: requiredInstances() returned false");
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("application/json");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        
+        logger.info("Starting file picker for contact import");
+        
+        try {
+            startActivityForResult(intent, REQUEST_CODE_IMPORT_CONTACTS);
+            logger.info("File picker started successfully");
+        } catch (android.content.ActivityNotFoundException e) {
+            logger.error("No app found to handle file picker", e);
+            Toast.makeText(getContext(), 
+                getString(R.string.import_contacts_no_app), 
+                Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void processContactImport(Uri uri) {
+        logger.info("ContactsSectionFragment: processContactImport called with URI: " + uri.toString());
+        
+        try {
+            String filePath = FileUtil.getRealPathFromURI(getActivity(), uri);
+            logger.info("ContactsSectionFragment: Resolved file path: " + filePath);
+            
+            if (filePath != null) {
+                logger.info("ContactsSectionFragment: Starting contact import from file: " + filePath);
+                ContactExportImportService.ImportResult result = contactExportImportService.importContacts(filePath);
+                logger.info("ContactsSectionFragment: Import completed - success: " + result.successCount + ", failed: " + result.failedCount);
+                
+                String message;
+                if (result.isSuccess() && result.failedCount == 0) {
+                    message = getString(R.string.import_contacts_success, result.successCount);
+                } else if (result.isSuccess() || result.isPartialSuccess()) {
+                    // Some contacts were imported but some failed
+                    if (result.failedCount > 0) {
+                        String baseMessage = getString(R.string.import_contacts_partial, 
+                            result.successCount, result.totalContacts, result.failedCount);
+                        if (result.errorMessage != null && result.errorMessage.contains("Failed to create")) {
+                            message = baseMessage + "\n\n" + result.errorMessage;
+                        } else {
+                            message = baseMessage + (result.errorMessage != null ? "\n\n" + result.errorMessage : "");
+                        }
+                    } else {
+                        message = getString(R.string.import_contacts_success, result.successCount);
+                    }
+                } else {
+                    message = getString(R.string.import_contacts_failed, 
+                        result.errorMessage != null ? result.errorMessage : "Unknown error");
+                }
+                
+                Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+                
+                // Refresh the contact list if any contacts were imported
+                if (result.successCount > 0) {
+                    logger.info("ContactsSectionFragment: Refreshing contact list after successful import");
+                    refreshContactListAfterImport();
+                }
+                
+            } else {
+                logger.error("ContactsSectionFragment: Could not resolve file path from URI: " + uri);
+                Toast.makeText(getActivity(), "Could not access the selected file", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            logger.error("ContactsSectionFragment: Exception during contact import", e);
+            Toast.makeText(getActivity(), "Import failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void refreshContactListAfterImport() {
+        logger.info("refreshContactListAfterImport() called");
+        
+        try {
+            // Method 1: Force update through resume pause handler
+            logger.info("Attempting to refresh via resumePauseHandler.runOnActive");
+            if (resumePauseHandler != null) {
+                resumePauseHandler.runOnActive(RUN_ON_ACTIVE_UPDATE_LIST, runIfActiveUpdateList);
+                logger.info("Scheduled refresh via resumePauseHandler");
+            } else {
+                logger.warn("resumePauseHandler is null, cannot use runOnActive");
+            }
+            
+            // Method 2: Direct call to updateList
+            logger.info("Attempting direct updateList() call");
+            updateList();
+            
+            // Method 3: Notify adapter directly if it exists
+            if (contactListAdapter != null) {
+                logger.info("Attempting to notify contactListAdapter directly");
+                RuntimeUtil.runOnUiThread(() -> {
+                    logger.info("Running on UI thread - notifying adapter of data change");
+                    contactListAdapter.notifyDataSetChanged();
+                });
+            } else {
+                logger.warn("contactListAdapter is null, cannot notify directly");
+            }
+            
+            // Method 4: Send broadcast to trigger refresh
+            logger.info("Sending contacts changed broadcast");
+            Intent refreshIntent = new Intent(IntentDataUtil.ACTION_CONTACTS_CHANGED);
+            LocalBroadcastManager.getInstance(getContext()).sendBroadcast(refreshIntent);
+            logger.info("Broadcast sent successfully");
+            
+        } catch (Exception e) {
+            logger.error("Exception during contact list refresh", e);
+        }
+        
+        logger.info("refreshContactListAfterImport() completed");
     }
 }

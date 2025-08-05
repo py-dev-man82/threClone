@@ -183,6 +183,28 @@
     <string name="backup_share_content">The following text string can be used together with the chosen password to restore your ${app_name_short} ID.</string>
     <!-- ${app_name_short} is a placeholder for the app's name, e.g. "Threema". It must be left as-is and not translated. -->
     <string name="backup_share_subject">${app_name_short} ID export for</string>
+    <!-- Contact export/import strings -->
+    <string name="export_contacts">Export Contacts</string>
+    <string name="import_contacts">Import Contacts</string>
+    <string name="export_contacts_title">Export Contact List</string>
+    <string name="import_contacts_title">Import Contact List</string>
+    <string name="export_contacts_summary">Export your contact list to a JSON file</string>
+    <string name="import_contacts_summary">Import contacts from a previously exported JSON file</string>
+    <string name="export_contacts_success">Contacts exported successfully to: %s</string>
+    <string name="export_contacts_failed">Failed to export contacts: %s</string>
+    <string name="import_contacts_success">Successfully imported %d contacts</string>
+    <string name="import_contacts_failed">Failed to import contacts: %s</string>
+    <string name="import_contacts_partial">Imported %1$d of %2$d contacts (%3$d failed)</string>
+    <string name="import_contacts_note">Imports both existing and new contacts from the exported file.</string>
+    <string name="select_contacts_file">Select contacts file to import</string>
+    <string name="no_contacts_to_export">No contacts to export</string>
+    <string name="confirm_import_contacts">Import %d contacts from file?</string>
+    <string name="contact_export_filename">threema_contacts_%s.json</string>
+    <string name="export_contacts_error">Export failed: %s</string>
+    <string name="import_contacts_error">Import failed: %s</string>
+    <string name="import_contacts_no_app">No app available to select files</string>
+    <string name="import_contacts_result" formatted="false">Import completed: %d added, %d skipped, %d errors</string>
+    <string name="import_contacts_errors">Errors: %s</string>
     <string name="add_attachment">New Attachment</string>
     <string name="invalid_passphrase">Invalid passphrase</string>
     <string name="master_key_locked">Master key is locked</string>
@@ -2070,4 +2092,9 @@
         <item quantity="many">%d group members</item>
         <item quantity="other">%d group members</item>
     </plurals>
+    
+    <string name="import_contacts_invalid_file">Invalid file format</string>
+    <string name="import_contacts_file_read_error">Error reading file</string>
+    <string name="import_contacts_parse_error">Error parsing JSON file</string>
+    <string name="export_contacts_no_contacts">No contacts to export</string>
 </resources>

@@ -21,19 +21,27 @@ function fail() {
     exit 1
 }
 
-DIR="./build/generated/source/proto/main"
-mkdir -p "$DIR"
-mkdir -p "$DIR/kotlin"
-mkdir -p "$DIR/java"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROTO_SRC="$SCRIPT_DIR/protocol/src"
+OUT_DIR="$SCRIPT_DIR/build/generated/source/proto/main"
+JAVA_OUT="$OUT_DIR/java"
+KOTLIN_OUT="$OUT_DIR/kotlin"
+
+mkdir -p "$JAVA_OUT"
+mkdir -p "$KOTLIN_OUT"
 
 log_major "Compiling protobuf"
-for file in protocol/src/*.proto; do
-    log_minor "Building $file..."
-    protoc \
-      --proto_path=protocol/src/ \
-      --java_out=lite:"$DIR/java" \
-      --kotlin_out=lite:"$DIR/kotlin" \
-      -I=protocol/src/ \
-      "$file"
-    log_minor "  OK"
+for file in "$PROTO_SRC"/*.proto; do
+    if [[ -f "$file" ]]; then
+        log_minor "Building $file..."
+        # ...existing code...
+                protoc \
+                  --proto_path="$PROTO_SRC" \
+                  --java_out=lite:"$JAVA_OUT" \
+                  --experimental_allow_proto3_optional \
+                  -I="$PROTO_SRC" \
+                  "$file"
+        # ...existing code...
+        log_minor "  OK"
+    fi
 done

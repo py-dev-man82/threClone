@@ -8,4 +8,14 @@
         android:title="@string/filter_list"
         app:showAsAction="never|collapseActionView"
         app:actionViewClass="ch.threema.app.ui.ThreemaSearchView" />
+    <item
+        android:id="@+id/menu_export_contacts"
+        android:icon="@drawable/ic_outline_save_alt_24"
+        android:title="@string/export_contacts"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_import_contacts"
+        android:icon="@drawable/ic_file_outline"
+        android:title="@string/import_contacts"
+        app:showAsAction="never" />
 </menu>

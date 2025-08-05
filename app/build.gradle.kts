@@ -47,7 +47,7 @@ if (gradle.startParameter.taskRequests.toString().contains("Hms")) {
 /**
  * Only use the scheme "<major>.<minor>.<patch>" for the appVersion
  */
-val appVersion = "6.1.1"
+val appVersion = "6.1.2"
 
 /**
  * betaSuffix with leading dash (e.g. `-beta1`).
@@ -56,7 +56,7 @@ val appVersion = "6.1.1"
  */
 val betaSuffix = ""
 
-val defaultVersionCode = 1084
+val defaultVersionCode = 1086
 
 /**
  * Map with keystore paths (if found).
@@ -437,11 +437,11 @@ android {
         }
         create("libre") {
             versionName = "${appVersion}l$betaSuffix"
-            applicationId = "ch.threema.app.libre"
+            applicationId = "ch.threema.app.libre1"
             testApplicationId = "ch.threema.app.libre.test"
             stringResValue("package_name", applicationId!!)
             setProductNames(
-                appName = "Threema Libre",
+                appName = "T1",
                 appNameDesktop = "Threema",
             )
             stringBuildConfigField("MEDIA_PATH", "ThreemaLibre")
